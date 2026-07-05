@@ -1,0 +1,106 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "todo-audit-skill"
+version = "0.1.0"
+description = "Codebase TODO scanner: detect, classify, and locate TODO comments."
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+gitignore = ["pathspec>=0.11"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.6",
+    "mypy>=1.8",
+    "poethepoet>=0.24",
+    "pathspec>=0.11",
+]
+
+[project.scripts]
+todo-audit = "todo_audit.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# ---------------------------------------------------------------------------
+# Task runner
+# ---------------------------------------------------------------------------
+[tool.poe.tasks.test]
+help = "Run the test suite with coverage"
+cmd = "uv run pytest"
+
+[tool.poe.tasks.lint]
+help = "Lint, format, and type-check the whole project"
+shell = """
+uv run ruff check --fix . &&
+uv run ruff format . &&
+uv run mypy .
+"""
+
+[tool.poe.tasks.lint-check]
+help = "CI check: verify lint, format, and types without modifying files"
+shell = """
+uv run ruff check . &&
+uv run ruff format --check . &&
+uv run mypy .
+"""
+
+# ---------------------------------------------------------------------------
+# Linting / formatting
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+src = ["src", "tests"]
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+# `UP` (pyupgrade) is intentionally omitted: project style keeps `typing.List`/`Optional`.
+select = ["E", "F", "I", "B", "SIM", "C4"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["todo_audit"]
+
+# ---------------------------------------------------------------------------
+# Type checking
+# ---------------------------------------------------------------------------
+[tool.mypy]
+# Runtime supports >=3.9; mypy itself requires a >=3.10 analysis target.
+python_version = "3.10"
+files = ["src", "tests"]
+mypy_path = "src"
+exclude = ["tests/fixtures"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["pathspec.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Tests / coverage
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q --cov=todo_audit --cov-report=term-missing --cov-report=html"
+
+[tool.coverage.run]
+source = ["todo_audit"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 85
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]

@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+node_modules/
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.DS_Store
+
+# Skill development / planning artifacts (not part of the published skill repo)
+openspec/
+.claude/
+CLAUDE.md
+
+# Demo GIF build scaffolding (the rendered docs/demo.gif is committed; its sources are not)
+demo/

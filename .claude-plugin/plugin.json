@@ -1,0 +1,13 @@
+{
+  "name": "todo-audit-skill",
+  "version": "0.1.0",
+  "description": "Audit, fix, and analyze TODO comments across a codebase.",
+  "author": "Ákos Jakub (arathus)",
+  "license": "MIT",
+  "skills": [
+    "skills/todo-audit-skill"
+  ],
+  "commands": [
+    "commands/todo"
+  ]
+}

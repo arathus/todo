@@ -1,0 +1,35 @@
+{
+  "name": "todo-audit-skill",
+  "version": "0.1.0",
+  "description": "A Claude Code skill that audits, fixes, and analyzes TODO comments across a codebase.",
+  "type": "module",
+  "bin": {
+    "todo-audit-skill-install": "./bin/installer.js"
+  },
+  "scripts": {
+    "postinstall": "node ./bin/installer.js"
+  },
+  "files": [
+    "bin/",
+    "skills/",
+    "commands/",
+    "src/",
+    ".claude-plugin/",
+    "pyproject.toml",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/todo-audit-skill.git"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "agent-skills",
+    "openskills",
+    "todo"
+  ],
+  "author": "",
+  "license": "MIT"
+}
