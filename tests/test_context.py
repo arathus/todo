@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 import pytest
 
 from todo_audit import scan_file
-from todo_audit.comments import find_markers, syntax_for
+from todo_audit.comments import MAX_CONTINUATION_LINES, find_markers, syntax_for
 from todo_audit.models import Scope, Todo, TodoType
 
 
@@ -112,6 +112,12 @@ def test_owner_form_keeps_its_type_and_marker(tmp_path: Path) -> None:
 # --- continuation lines ---------------------------------------------------
 
 
+def _descriptions(source: str, ext: str = ".py") -> List[str]:
+    syntax = syntax_for(ext)
+    assert syntax is not None, f"no comment syntax registered for {ext}"
+    return [h.description for h in find_markers(source, syntax)]
+
+
 def test_indented_continuation_is_appended() -> None:
     syntax = syntax_for(".py")
     assert syntax is not None, "no comment syntax registered for .py"
@@ -121,12 +127,86 @@ def test_indented_continuation_is_appended() -> None:
     )
 
 
-def test_unindented_comment_is_not_absorbed() -> None:
-    syntax = syntax_for(".py")
-    assert syntax is not None, "no comment syntax registered for .py"
-    hits = find_markers("# TODO: mine\n# an unrelated remark\n", syntax)
-    assert [h.description for h in hits] == ["mine"], (
-        "a comment at the same indentation is a separate remark, not a continuation"
+def test_aligned_continuation_is_appended() -> None:
+    # the commonest wrapped style of all: no extra indentation, just the next
+    # comment line. Requiring an indent silently truncated these.
+    assert _descriptions("# TODO: rework the retry path\n# because the gateway returns 202\n") == [
+        "rework the retry path because the gateway returns 202"
+    ], "a description wrapped at the same indentation is still one description"
+
+
+def test_continuation_stops_at_a_blank_line() -> None:
+    assert _descriptions("# TODO: mine\n\n# an unrelated remark\n") == ["mine"], (
+        "a blank line ends the comment block, so what follows is a separate remark"
+    )
+
+
+def test_continuation_stops_at_code() -> None:
+    assert _descriptions("# TODO: mine\nx = 1\n# a later remark\n") == ["mine"], (
+        "a statement between the two comments means they are about different things"
+    )
+
+
+def test_a_trailing_marker_owns_nothing_below_it() -> None:
+    assert _descriptions("x = 1  # TODO: fix\n# an unrelated note\n") == ["fix"], (
+        "a marker trailing a statement is a remark about that statement; the line below is not its continuation"
+    )
+
+
+def test_a_trailing_comment_is_not_absorbed_as_a_continuation() -> None:
+    assert _descriptions("# TODO: fix the parser\ny = 2  # unrelated note about y\n") == ["fix the parser"], (
+        "a comment trailing a later statement describes that statement, not the TODO above it"
+    )
+
+
+@pytest.mark.parametrize(
+    "directive",
+    [
+        "# noqa: E501",
+        "# type: ignore",
+        "# pylint: disable=all",
+        "# fmt: off",
+        "# Copyright 2020 Acme",
+        "# SPDX-License-Identifier: MIT",
+    ],
+)
+def test_continuation_stops_at_tool_directives_and_licence_headers(directive: str) -> None:
+    assert _descriptions(f"# TODO: fix the parser\n{directive}\n") == ["fix the parser"], (
+        f"{directive!r} is machinery, not prose, so it must not become part of the description"
+    )
+
+
+def test_one_block_comment_is_one_description() -> None:
+    assert _descriptions("/* TODO: fix the parser\n   because of the grammar */\n", ".js") == [
+        "fix the parser because of the grammar"
+    ], "the lines of a single `/* ... */` are literally one comment"
+
+
+def test_a_block_comment_continues_even_when_it_trails_a_statement() -> None:
+    # the own-line rule does not apply within a block: the wrapped line is part
+    # of the same lexical comment, not a remark about a different statement
+    assert _descriptions("const x = 1; /* TODO: fix\n   wrapped here */\n", ".js") == ["fix wrapped here"], (
+        "a wrapped block comment is one comment however it started"
+    )
+
+
+def test_a_closed_block_does_not_absorb_the_next_block() -> None:
+    assert _descriptions("/* TODO: first */\n/* an unrelated second */\n", ".js") == ["first"], (
+        "the closing delimiter ends the comment, so the block below it is a new one"
+    )
+
+
+def test_a_line_comment_does_not_absorb_a_following_block() -> None:
+    assert _descriptions("// TODO: first\n/* an unrelated block */\n", ".js") == ["first"], (
+        "a `//` comment and a `/* */` below it are two different comments"
+    )
+
+
+def test_continuation_is_capped() -> None:
+    source = "# TODO: a\n" + "".join(f"# line{i}\n" for i in range(8))
+    words = _descriptions(source)[0].split()
+    assert len(words) == 1 + MAX_CONTINUATION_LINES, (
+        f"an unbounded continuation would swallow a whole comment block; the cap is {MAX_CONTINUATION_LINES} lines"
     )
 
 

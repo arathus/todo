@@ -40,8 +40,12 @@ explicit sigil always overrides (`?FIXME:` is a question):
 | `HACK:`  | plain        | a known workaround; routine debt |
 
 `TODO(alice):` and `TODO(#412):` are recognized too; the parenthesised owner is
-reported separately in `assignee`. An indented comment line directly below a
-marker continues its description.
+reported separately in `assignee`.
+
+A description wrapped over several comment lines arrives as **one**
+`description`, indented or not. It stops at a blank line, at code, at another
+marker, at a tool directive or licence header, and after five lines. A marker
+trailing a statement owns nothing below it; a single `/* … */` always joins.
 
 ## The Scanner
 

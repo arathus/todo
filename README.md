@@ -67,13 +67,31 @@ word-anchored: `NOTODO:` and `METODO:` are not markers.
 
 The `TODO(owner):` convention is supported — `TODO(alice):` and `TODO(#412):`
 both parse, and the owner is reported separately in `assignee` rather than being
-buried in the description. An **indented** comment line directly below a marker
-continues it, so a wrapped description is not truncated:
+buried in the description.
+
+### Wrapped descriptions
+
+A description spread over several comment lines is read as **one** description,
+whether or not the continuation is indented:
 
 ```python
 # !TODO(alice): rework the refund path
-#   the gateway returns 202 for partial refunds
+# the gateway returns 202 for partial refunds
 ```
+
+The rule is *own-line comments*, not indentation. Scanning stops at the first
+line that is a blank line, real code, another marker, or a tool directive or
+licence header (`# noqa`, `# type:`, `Copyright`, `SPDX-`, …) — and at five
+lines, so a stray comment block below a TODO cannot be swallowed whole.
+
+Two consequences worth knowing:
+
+- A marker **trailing a statement** owns nothing below it, and a comment
+  trailing a later statement is never absorbed — `x = 1  # TODO: fix` followed by
+  `y = 2  # note about y` stays two separate remarks.
+- Inside a single `/* … */` the lines are one comment by definition, so they join
+  even when the block opens after code. A **closed** block does not absorb the
+  next one.
 
 ## ⚡ Commands
 

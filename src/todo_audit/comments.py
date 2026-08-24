@@ -55,9 +55,39 @@ def build_marker_re(keywords: Tuple[str, ...]) -> Pattern[str]:
 
 MARKER_RE = build_marker_re(MARKER_KEYWORDS)
 
-# A comment line continues the marker above it when it is indented and carries
-# no marker of its own. Leading decoration (JSDoc's ``*``) is dropped.
+# A comment line continues the marker above it when it stands on its own line
+# and carries no marker of its own. Leading decoration (JSDoc's ``*``) is dropped.
 _CONTINUATION_TRIM = " \t*"
+
+# How many following lines a single marker may absorb. Bounds the damage when a
+# genuinely unrelated comment block sits directly beneath a TODO.
+MAX_CONTINUATION_LINES = 5
+
+# Comment lines that are machinery rather than prose. These end a continuation:
+# a tool directive or a licence header is never part of a TODO's description.
+_DIRECTIVE_RE = re.compile(
+    r"^(?:!"  # shebang
+    r"|-\*-"  # editor mode line
+    r"|coding[:=]"
+    r"|noqa\b|type:\s|pragma\b|pylint:|mypy:|ruff:|flake8:|isort:|fmt:\s*(?:on|off)"
+    r"|eslint|prettier|@ts-|c8 |istanbul "
+    r"|copyright\b|spdx-|licen[cs]e\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+class CommentLine(NamedTuple):
+    """The comment text on one line, and whether it starts that line.
+
+    ``own_line`` is what separates a wrapped description from an unrelated
+    trailing comment: ``x = 1  # TODO: fix`` followed by ``y = 2  # note`` is two
+    remarks about two statements, not one wrapped sentence.
+    """
+
+    text: str
+    own_line: bool
+    block_id: int = 0  # nonzero: lines sharing a value are one `/* ... */` comment
 
 
 class MarkerHit(NamedTuple):
@@ -205,14 +235,28 @@ def _openers(syntax: LangSyntax) -> FrozenSet[str]:
     return frozenset(chars)
 
 
-def comment_text_by_line(source: str, syntax: LangSyntax) -> Dict[int, str]:
-    """Return {1-based line number: concatenated comment text on that line}.
+def _starts_line(source: str, index: int) -> bool:
+    """Whether only whitespace precedes ``index`` on its line.
+
+    Computed at comment boundaries rather than tracked per character: comments
+    are a small fraction of a source file, and a per-character check showed up
+    plainly in the scan benchmark.
+    """
+    return not source[source.rfind("\n", 0, index) + 1 : index].strip()
+
+
+def comment_text_by_line(source: str, syntax: LangSyntax) -> Dict[int, CommentLine]:
+    """Return {1-based line number: the comment on that line}.
 
     Only characters that are inside comments are returned; string and code
     characters are dropped, so downstream marker matching never sees a marker
-    that lives inside a string literal.
+    that lives inside a string literal. Each entry also records whether the
+    comment starts its line, which is what lets a wrapped description be told
+    apart from an unrelated comment trailing a different statement.
     """
     out: Dict[int, List[str]] = {}
+    starts_line: Dict[int, bool] = {}
+    block_ids: Dict[int, int] = {}
     line_no = 1
     i = 0
     n = len(source)
@@ -222,6 +266,14 @@ def comment_text_by_line(source: str, syntax: LangSyntax) -> Dict[int, str]:
     prev_char = ""  # last significant *code* character seen
     word_buf = ""  # word currently being accumulated
     last_word = ""  # most recent code word
+    block_own_line = False  # did the open `/*` start its line?
+    block_first_piece = False  # the next block piece is on the opening line
+    block_seq = 0  # identifies which block comment a body line came from
+
+    def add(text: str, own_line: bool, block_id: int = 0) -> None:
+        out.setdefault(line_no, []).append(text)
+        starts_line.setdefault(line_no, own_line)
+        block_ids.setdefault(line_no, block_id)
 
     # Only these characters can open a string, a comment, or a regex literal.
     # Every other code character is skipped after one set lookup.
@@ -247,7 +299,8 @@ def comment_text_by_line(source: str, syntax: LangSyntax) -> Dict[int, str]:
                 if offset:
                     line_no += 1
                 if piece:
-                    out.setdefault(line_no, []).append(piece)
+                    add(piece, block_own_line if block_first_piece else True, block_seq)
+                    block_first_piece = False
             if found == -1:
                 i = n
             else:
@@ -297,16 +350,20 @@ def comment_text_by_line(source: str, syntax: LangSyntax) -> Dict[int, str]:
 
             if syntax.block and source.startswith(syntax.block[0], i):
                 in_block = True
+                block_seq += 1
+                block_own_line = _starts_line(source, i)
+                block_first_piece = True
                 i += len(syntax.block[0])
                 continue
 
             if syntax.line and source.startswith(syntax.line, i):
+                own_line = _starts_line(source, i)
                 i += len(syntax.line)
                 # rest of the physical line is a comment
                 found = source.find("\n", i)
                 stop = n if found == -1 else found
                 if stop > i:
-                    out.setdefault(line_no, []).append(source[i:stop])
+                    add(source[i:stop], own_line)
                 i = stop
                 continue
 
@@ -334,38 +391,46 @@ def comment_text_by_line(source: str, syntax: LangSyntax) -> Dict[int, str]:
                 prev_char = ch
         i += 1
 
-    return {ln: "".join(frags) for ln, frags in out.items()}
+    return {ln: CommentLine("".join(frags), starts_line[ln], block_ids[ln]) for ln, frags in out.items()}
 
 
-def _is_continuation(text: str) -> bool:
-    """Whether a comment line reads as a continuation of the marker above it.
+def _continuation(by_line: Dict[int, CommentLine], line_no: int) -> str:
+    """Text of the comment lines that continue the marker on ``line_no``.
 
-    A single space is just the separator after ``#`` or ``//``, so it does not
-    signal continuation; two or more means the author indented deliberately.
-    A leading ``*`` is JSDoc decoration and counts either way.
+    A description wrapped over several comment lines is one description, however
+    the author aligned it — requiring extra indentation would silently truncate
+    the commonest style of all:
+
+    .. code-block:: python
+
+        # TODO: rework the retry path
+        # because the gateway returns 202
+
+    The discriminator is therefore *own-line*, not indentation. A marker trailing
+    a statement owns nothing below it, and a comment trailing a later statement
+    is a remark about that statement rather than a continuation. Scanning also
+    stops at a blank line, at real code, at another marker, and at tool
+    directives or licence headers, which are machinery rather than prose.
     """
-    body = text.lstrip(" \t")
-    if body.startswith("*"):
-        return True
-    return len(text) - len(body) >= 2
-
-
-def _continuation(by_line: Dict[int, str], line_no: int) -> str:
-    """Text of the indented comment lines that continue the marker on ``line_no``.
-
-    Stops at the first line that is not a comment, is not indented, is blank, or
-    starts a marker of its own — so an unrelated comment below is never absorbed.
-    """
+    head = by_line[line_no]
     parts: List[str] = []
     probe = line_no + 1
-    while True:
-        text = by_line.get(probe)
-        if text is None or not _is_continuation(text):
+    while len(parts) < MAX_CONTINUATION_LINES:
+        entry = by_line.get(probe)
+        if entry is None:
             break
-        if MARKER_RE.search(text):
+        if head.block_id:
+            # Inside a `/* ... */` the lines are literally one comment, so they
+            # continue it even when the opener trailed a statement — but the
+            # closing delimiter ends it, so a following block is a new comment.
+            if entry.block_id != head.block_id:
+                break
+        elif entry.block_id or not (head.own_line and entry.own_line):
             break
-        stripped = text.strip(_CONTINUATION_TRIM).strip()
-        if not stripped:
+        if MARKER_RE.search(entry.text):
+            break
+        stripped = entry.text.strip(_CONTINUATION_TRIM).strip()
+        if not stripped or _DIRECTIVE_RE.match(stripped):
             break
         parts.append(stripped)
         probe += 1
@@ -376,7 +441,8 @@ def find_markers(source: str, syntax: LangSyntax) -> List[MarkerHit]:
     """Return one :class:`MarkerHit` per marker found in a real comment."""
     by_line = comment_text_by_line(source, syntax)
     results: List[MarkerHit] = []
-    for line_no, text in by_line.items():
+    for line_no, entry in by_line.items():
+        text = entry.text
         matches = list(MARKER_RE.finditer(text))
         for index, m in enumerate(matches):
             marker = m.group("marker")
