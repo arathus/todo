@@ -13,7 +13,7 @@ def _frontmatter(text: str) -> str:
 
 
 def test_skill_md_exists() -> None:
-    assert SKILL.exists()
+    assert SKILL.exists(), f"the skill manifest is missing from {SKILL}; Claude Code cannot load the skill without it"
 
 
 def test_frontmatter_has_required_keys() -> None:

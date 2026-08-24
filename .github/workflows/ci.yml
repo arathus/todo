@@ -22,3 +22,5 @@ jobs:
         run: uv run poe lint-check
       - name: Test with coverage
         run: uv run poe test
+      - name: Scan-throughput guard
+        run: uv run poe perf

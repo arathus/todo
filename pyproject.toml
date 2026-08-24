@@ -4,9 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "todo-audit-skill"
-version = "0.1.0"
+# Single source of truth: src/todo_audit/__init__.py::__version__
+dynamic = ["version"]
 description = "Codebase TODO scanner: detect, classify, and locate TODO comments."
+readme = "README.md"
 requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Ákos Jakub (arathus)" }]
 dependencies = []
 
 [project.optional-dependencies]
@@ -26,8 +30,14 @@ todo-audit = "todo_audit.cli:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+[tool.setuptools.dynamic]
+version = { attr = "todo_audit.__version__" }
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+todo_audit = ["py.typed"]
 
 # ---------------------------------------------------------------------------
 # Task runner
@@ -52,6 +62,18 @@ uv run ruff format --check . &&
 uv run mypy .
 """
 
+[tool.poe.tasks.perf]
+help = "Run the scan-throughput guard (needs no coverage instrumentation)"
+cmd = "uv run pytest tests/test_performance.py --no-cov -q"
+
+[tool.poe.tasks.bench]
+help = "Measure scan throughput over generated Python and JS corpora"
+cmd = "uv run python tools/benchmark.py"
+
+[tool.poe.tasks.sync-version]
+help = "Propagate todo_audit.__version__ to package.json and plugin.json"
+cmd = "uv run python tools/sync_version.py"
+
 # ---------------------------------------------------------------------------
 # Linting / formatting
 # ---------------------------------------------------------------------------
@@ -74,9 +96,11 @@ known-first-party = ["todo_audit"]
 [tool.mypy]
 # Runtime supports >=3.9; mypy itself requires a >=3.10 analysis target.
 python_version = "3.10"
-files = ["src", "tests"]
+files = ["src", "tests", "tools"]
 mypy_path = "src"
-exclude = ["tests/fixtures"]
+# build/ holds a copy of the package after `uv build`, which mypy would
+# otherwise report as a duplicate module.
+exclude = ["tests/fixtures", "build"]
 strict = true
 
 [[tool.mypy.overrides]]

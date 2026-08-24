@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "todo-audit-skill",
+  "description": "Turn scattered TODO comments into a triaged, actionable worklist.",
+  "owner": {
+    "name": "Ákos Jakub (arathus)",
+    "url": "https://github.com/arathus"
+  },
+  "plugins": [
+    {
+      "name": "todo",
+      "description": "Audit, fix, and analyze TODO comments across a codebase. Provides /todo:audit, /todo:fix, and /todo:analyze.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

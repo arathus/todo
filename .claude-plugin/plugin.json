@@ -1,13 +1,17 @@
 {
-  "name": "todo-audit-skill",
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "todo",
   "version": "0.1.0",
   "description": "Audit, fix, and analyze TODO comments across a codebase.",
-  "author": "Ákos Jakub (arathus)",
+  "author": {
+    "name": "Ákos Jakub (arathus)",
+    "url": "https://github.com/arathus"
+  },
   "license": "MIT",
-  "skills": [
-    "skills/todo-audit-skill"
-  ],
-  "commands": [
-    "commands/todo"
+  "keywords": [
+    "todo",
+    "audit",
+    "technical-debt",
+    "code-quality"
   ]
 }

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Dict
+from typing import Any, Dict, NamedTuple, Optional
 
 
 class TodoType(str, Enum):
@@ -39,6 +40,13 @@ SORT_WEIGHT: Dict[TodoType, int] = {
 }
 
 
+class ScopeInfo(NamedTuple):
+    """The tightest enclosing structure, and its name where one exists."""
+
+    scope: Scope
+    symbol: Optional[str]  # dotted path, e.g. "PaymentService.refund"
+
+
 @dataclass(frozen=True)
 class Todo:
     """One detected TODO comment."""
@@ -48,18 +56,32 @@ class Todo:
     type: TodoType
     scope: Scope
     description: str
+    marker: str = "TODO"  # keyword that produced it: TODO / FIXME / HACK / XXX
+    symbol: Optional[str] = None  # enclosing function/class, when resolvable
+    assignee: Optional[str] = None  # owner from the `TODO(alice):` convention
 
     @property
     def color(self) -> str:
         return COLOR_BY_TYPE[self.type]
 
     @property
-    def sort_weight(self) -> int:
-        return SORT_WEIGHT[self.type]
+    def identity(self) -> str:
+        """Stable id over content, not position.
+
+        Deliberately excludes the line number so that editing the lines above a
+        TODO does not make it look like a new one. This is what lets ``/todo:fix``
+        deduplicate its managed ``CLAUDE.md`` section across runs. The enclosing
+        symbol *is* included, so two identically worded TODOs in different
+        methods stay distinguishable.
+        """
+        normalized = " ".join(self.description.lower().split())
+        material = f"{self.file}\0{self.symbol or ''}\0{self.marker}\0{normalized}"
+        return hashlib.sha256(material.encode()).hexdigest()[:12]
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["type"] = self.type.value
         data["scope"] = self.scope.value
         data["color"] = self.color
+        data["id"] = self.identity
         return data

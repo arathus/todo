@@ -59,7 +59,11 @@ def render_severity_list(todos: List[Todo]) -> str:
             continue
         lines.append(f"### {_TYPE_LABEL[todo_type]}  _(color: {COLOR_BY_TYPE[todo_type]})_")
         for t in items:
-            lines.append(f"- `{t.file}:{t.line}` [{t.scope.value}] — {t.description}")
+            # the keyword is only worth printing when it is not the default one
+            keyword = "" if t.marker == "TODO" else f" `{t.marker}`"
+            where = f" in `{t.symbol}`" if t.symbol else ""
+            owner = f" (@{t.assignee})" if t.assignee else ""
+            lines.append(f"- `{t.file}:{t.line}` [{t.scope.value}]{where}{keyword}{owner} — {t.description}")
         lines.append("")
     return "\n".join(lines).rstrip() + ("\n" if lines else "")
 
