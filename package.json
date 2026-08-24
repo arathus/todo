@@ -13,7 +13,8 @@
     "bin/",
     "skills/",
     "commands/",
-    "src/",
+    "src/todo_audit/*.py",
+    "src/todo_audit/py.typed",
     ".claude-plugin/",
     "pyproject.toml",
     "README.md",
@@ -21,7 +22,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-username/todo-audit-skill.git"
+    "url": "git+https://github.com/arathus/todo.git"
+  },
+  "homepage": "https://github.com/arathus/todo#readme",
+  "bugs": {
+    "url": "https://github.com/arathus/todo/issues"
   },
   "keywords": [
     "claude",
@@ -30,6 +35,6 @@
     "openskills",
     "todo"
   ],
-  "author": "",
+  "author": "Ákos Jakub (arathus)",
   "license": "MIT"
 }
