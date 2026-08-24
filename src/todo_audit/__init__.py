@@ -6,7 +6,7 @@ from .scanner import scan_file, scan_path
 
 # Single source of truth for the version: pyproject.toml reads it from here, and
 # `poe sync-version` propagates it to package.json and .claude-plugin/plugin.json.
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Todo",

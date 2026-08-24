@@ -1,6 +1,6 @@
 {
   "name": "todo-audit-skill",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A Claude Code skill that audits, fixes, and analyzes TODO comments across a codebase.",
   "type": "module",
   "bin": {
