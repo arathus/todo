@@ -26,6 +26,10 @@ Three marker types are recognized inside real comments (never inside strings):
 
 Sort order is always **urgent (`!`) → question (`?`) → plain**.
 
+The sigil is accepted on either side of the keyword, so `TODO!:` is the same as
+`!TODO:` and `TODO?:` the same as `?TODO:`, for every keyword. A leading sigil
+wins if both positions are used and disagree.
+
 Three further keywords are recognized and carry a default type, which an
 explicit sigil always overrides (`?FIXME:` is a question):
 

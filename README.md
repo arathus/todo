@@ -47,6 +47,11 @@ literals:
 
 Everything sorts in one fixed order: **`!` → `?` → plain**.
 
+The sigil may sit on **either side** of the keyword: `TODO!:` reads exactly like
+`!TODO:`, and `TODO?:` like `?TODO:`. Both spellings occur in the wild, so both
+are accepted for every keyword. If both positions are used and disagree, the
+leading one decides.
+
 Three widespread keywords are recognized alongside `TODO`, each with a default
 type that an explicit sigil overrides — `?FIXME:` is a question:
 

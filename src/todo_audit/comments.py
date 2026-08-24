@@ -40,11 +40,16 @@ def build_marker_re(keywords: Tuple[str, ...]) -> Pattern[str]:
     The leading lookbehind is what keeps ``NOTODO:`` / ``METODO:`` from being
     reported as a ``TODO``. The optional parenthesised group captures the
     widespread ``TODO(alice):`` / ``TODO(#412):`` owner convention.
+
+    The sigil is accepted on either side of the keyword, so ``TODO!:`` reads
+    exactly like ``!TODO:``. Both positions occur in the wild, and a marker
+    written the other way round used to match nothing at all — an urgent item
+    would vanish from the audit entirely rather than merely lose its severity.
     """
     alternation = "|".join(sorted(keywords, key=len, reverse=True))
     return re.compile(
         rf"(?<![A-Za-z0-9_])(?P<sigil>[!?])?(?P<marker>{alternation})"
-        rf"(?:\((?P<assignee>[^)\n]{{1,64}})\))?:\s?(?P<desc>.*)"
+        rf"(?:\((?P<assignee>[^)\n]{{1,64}})\))?(?P<trailing_sigil>[!?])?:\s?(?P<desc>.*)"
     )
 
 
@@ -375,7 +380,9 @@ def find_markers(source: str, syntax: LangSyntax) -> List[MarkerHit]:
         matches = list(MARKER_RE.finditer(text))
         for index, m in enumerate(matches):
             marker = m.group("marker")
-            sigil = m.group("sigil")
+            # `!TODO:` and `TODO!:` mean the same thing; a leading sigil wins if
+            # both are somehow given, being the documented canonical position.
+            sigil = m.group("sigil") or m.group("trailing_sigil")
             todo_type = _SIGIL_TO_TYPE[sigil] if sigil else DEFAULT_TYPE_BY_MARKER[marker]
             description = m.group("desc").strip()
             # only the last marker on a line can own the lines below it

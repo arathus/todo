@@ -54,7 +54,8 @@ suggested-fix table. **Read-only: never edit a file in this command.**
 
    `marker` is the keyword that produced the record: `TODO`, `FIXME`, `HACK`, or
    `XXX`. `FIXME` and `XXX` default to urgent and `HACK` to plain, and an
-   explicit `!`/`?` sigil overrides that default. `assignee` holds the owner from
+   explicit `!`/`?` sigil overrides that default — on either side of the keyword,
+   so `TODO!:` and `!TODO:` are the same marker. `assignee` holds the owner from
    the `TODO(alice):` form when one was given.
 
    Each record carries `symbol` (the enclosing function or class) — use it

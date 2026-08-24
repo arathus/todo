@@ -1,5 +1,7 @@
 from typing import List, Tuple
 
+import pytest
+
 from todo_audit.comments import MARKER_KEYWORDS, find_markers, syntax_for
 from todo_audit.models import TodoType
 
@@ -90,6 +92,52 @@ def test_sigil_overrides_keyword_default() -> None:
         (TodoType.QUESTION, "is this still broken"),
         (TodoType.URGENT, "must go before release"),
     ], "an explicit sigil must win over the keyword's default type"
+
+
+@pytest.mark.parametrize(
+    ("leading", "trailing", "expected"),
+    [
+        ("# !TODO: x", "# TODO!: x", TodoType.URGENT),
+        ("# ?TODO: x", "# TODO?: x", TodoType.QUESTION),
+        ("# !FIXME: x", "# FIXME!: x", TodoType.URGENT),
+        ("# ?HACK: x", "# HACK?: x", TodoType.QUESTION),
+        ("# !XXX: x", "# XXX!: x", TodoType.URGENT),
+    ],
+)
+def test_trailing_sigil_reads_the_same_as_a_leading_one(leading: str, trailing: str, expected: TodoType) -> None:
+    assert _hits(leading + "\n", ".py") == _hits(trailing + "\n", ".py"), (
+        f"{trailing!r} must be equivalent to {leading!r}; both spellings occur in the wild"
+    )
+    assert _hits(trailing + "\n", ".py") == [(expected, "x")], f"{trailing!r} must resolve to {expected.value}"
+
+
+def test_trailing_sigil_alone_was_previously_invisible() -> None:
+    # regression: before the sigil was accepted on both sides, `TODO!:` matched
+    # nothing at all, so an urgent item vanished rather than losing its severity
+    assert _hits("# TODO!: do not lose me\n", ".py") == [(TodoType.URGENT, "do not lose me")], (
+        "a marker written with a trailing sigil must be reported, not silently dropped"
+    )
+
+
+def test_trailing_sigil_composes_with_an_owner() -> None:
+    syntax = syntax_for(".py")
+    assert syntax is not None, "no comment syntax is registered for .py, so this test cannot run"
+    hits = find_markers("# TODO(alice)!: urgent and owned\n", syntax)
+    assert [(h.type, h.assignee, h.description) for h in hits] == [(TodoType.URGENT, "alice", "urgent and owned")], (
+        "the sigil sits outside the owner group, so `TODO(alice)!:` must parse as both urgent and assigned"
+    )
+
+
+def test_a_leading_sigil_wins_over_a_conflicting_trailing_one() -> None:
+    assert _hits("# !TODO?: contradictory\n", ".py") == [(TodoType.URGENT, "contradictory")], (
+        "when both positions are used and disagree, the documented leading position decides"
+    )
+
+
+def test_word_anchoring_still_holds_with_a_trailing_sigil() -> None:
+    assert _hits("# NOTODO!: not a marker\n# METODO!: not a marker\n", ".py") == [], (
+        "accepting a trailing sigil must not weaken the lookbehind that rejects embedded keywords"
+    )
 
 
 def test_marker_keyword_is_reported() -> None:
