@@ -74,7 +74,7 @@ continues it, so a wrapped description is not truncated:
 
 | Command         | What it does |
 | --------------- | ------------ |
-| `/todo:audit`   | Scans the codebase, lists TODOs by severity, ranks each on a 1–5 difficulty scale, suggests a fix from surrounding code context, consolidates related items, and asks clarifying questions when context is thin. Read-only, and enforced as such via `allowed-tools`. |
+| `/todo:audit`   | Scans the codebase, lists TODOs by severity, consolidates related items, and ranks each on a 1–5 difficulty scale. Reports a **table** for scanning (location, symbol, difficulty, kind, one-line summary) plus a **detail block per task** for deciding — the concrete change, why the code argues for it, what it risks, and how to verify. Asks clarifying questions rather than guessing. Read-only, enforced via `allowed-tools`. |
 | `/todo:fix`     | Applies fixes **after you approve them item by item**, then runs the project's checks and reports the real result. System-level fixes are routed into a managed section of `CLAUDE.md`, deduplicated on the stable `id`; their TODO comment stays in the code pointing at that entry. Temporary fixes are never persisted. |
 | `/todo:analyze` | Checks the code against the requirements declared in **every** `CLAUDE.md` location Claude Code itself reads — `./CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules/*.md`, nested files — and proposes new TODOs as a diff for your approval before anything is written. |
 

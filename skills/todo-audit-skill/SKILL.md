@@ -101,10 +101,28 @@ the interpreter running the scan, the engine says so on stderr and falls back to
 the built-in denylist. Surface that note; installing it is
 `python3 -m pip install pathspec`.
 
+## Audit output shape
+
+`/todo:audit` produces two things, and both are required:
+
+1. A **markdown pipe table** — one row per consolidated task, columns
+   `# | TODO(s) | Location | Symbol | Diff. | Kind | Summary`. Every cell is
+   short and single-line so it aligns in a terminal; `Summary` is one imperative
+   clause of at most 60 characters. Never replace the table with a list, and
+   never emit per-task `Field: value` blocks instead of it.
+2. A **detail block per row** underneath, which is where the reasoning goes:
+   **Change** (the concrete edit, naming files and symbols), **Why** (the
+   argument from the code that was read), **Risk** (what could break, plus any
+   rejected alternative and the reason), **Verify** (how the user confirms it).
+
+Long prose in a table cell is what breaks the alignment; that is exactly why the
+reasoning lives in the block and not in the row. A bare imperative with no
+reasoning behind it is not an acceptable fix proposal.
+
 ## Commands
 
-- `/todo:audit` — scan, list by severity, rank difficulty, suggest fixes, ask
-  clarifying questions. Read-only.
+- `/todo:audit` — scan, list by severity, rank difficulty, propose fixes as a
+  table plus per-task detail blocks, ask clarifying questions. Read-only.
 - `/todo:fix` — apply fixes **after explicit user approval**, route system-level
   fixes to `CLAUDE.md`, then run the project's checks and report the result.
 - `/todo:analyze` — check code against the requirements declared in every

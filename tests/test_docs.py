@@ -115,6 +115,44 @@ def test_audit_handles_an_empty_result_and_bounds_its_reading() -> None:
     assert "vocabulary" in text, "/todo:audit must take the difficulty labels from the payload, not from memory"
 
 
+def test_audit_specifies_a_real_markdown_table() -> None:
+    text = (COMMANDS / "audit.md").read_text(encoding="utf-8")
+    assert "| # | TODO(s) | Location | Symbol | Diff. | Kind | Summary |" in text, (
+        "the exact column header must be given: asking for 'a table row' without one is what let the model "
+        "emit `Field: value` blocks instead"
+    )
+    assert "| - | ------- |" in text, "a pipe table needs its header separator row shown, or the output will not render"
+    assert "Field: value" in text, (
+        "the key-value shape the model actually produced must be named as the wrong answer, not merely implied"
+    )
+    assert "single-line" in text, "cells must be required to stay single-line, or long prose breaks the alignment"
+
+
+def test_audit_requires_reasoning_behind_each_fix() -> None:
+    text = (COMMANDS / "audit.md").read_text(encoding="utf-8")
+    for heading in ("**Change:**", "**Why:**", "**Risk:**", "**Verify:**"):
+        assert heading in text, (
+            f"a fix proposal must cover {heading.strip('*:')}; a bare imperative gives the user no basis to approve"
+        )
+    assert "rejected" in text, "a considered-and-rejected alternative is the most useful part of a design proposal"
+
+
+def test_audit_carries_a_worked_example_of_both_shapes() -> None:
+    text = (COMMANDS / "audit.md").read_text(encoding="utf-8")
+    assert "Worked example" in text, "models follow a demonstrated shape far more reliably than a described one"
+    example = text.split("Worked example", 1)[1]
+    assert "| 1 |" in example, "the example must show real table rows"
+    assert "#### 1." in example, "the example must show the per-task detail block that pairs with those rows"
+
+
+def test_skill_states_the_audit_output_contract() -> None:
+    text = SKILL.read_text(encoding="utf-8")
+    assert "Audit output shape" in text, (
+        "the output contract belongs in SKILL.md too: the skill can be invoked without the slash command"
+    )
+    assert "Diff." in text and "Summary" in text, "SKILL.md must name the table's columns"
+
+
 def test_audit_is_declared_read_only() -> None:
     text = (COMMANDS / "audit.md").read_text(encoding="utf-8")
     assert "allowed-tools:" in text, (
