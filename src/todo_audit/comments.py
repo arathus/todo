@@ -1,16 +1,23 @@
 """Comment-syntax table and comment-aware marker detection.
 
-Markers are only matched inside *real* comments. A tiny per-language tokenizer
-walks the source tracking string, block-comment, and (for JS/TS) regex-literal
-state so that a marker inside a string literal (e.g. ``x = "TODO: not real"``)
-is never reported.
+Markers are only matched inside *real* comments. A per-language tokenizer walks
+the source tracking string, block-comment, and (for JS/TS) regex-literal state so
+that a marker inside a string literal (e.g. ``x = "TODO: not real"``) is never
+reported.
+
+The walk is span-based rather than character-based: a compiled alternation finds
+the next construct that can interrupt plain code, and everything before it is
+skipped in one step by the regex engine. Ordinary code is the overwhelming
+majority of any source file, and skipping it in C rather than in a Python loop is
+worth roughly a two-fold difference in scan throughput.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, List, NamedTuple, Optional, Pattern, Tuple
+from functools import lru_cache
+from typing import Dict, List, NamedTuple, Optional, Pattern, Tuple
 
 from .models import TodoType
 
@@ -217,22 +224,64 @@ def syntax_for(ext: str) -> Optional[LangSyntax]:
     return SYNTAX_BY_EXT.get(ext.lower())
 
 
-def _openers(syntax: LangSyntax) -> FrozenSet[str]:
-    """First characters of every construct that interrupts plain code.
+@lru_cache(maxsize=None)
+def _opener_scanner(syntax: LangSyntax) -> Pattern[str]:
+    """Regex matching the next position where plain code could end.
 
-    The source walkers test this before attempting any multi-character match, so
-    an ordinary code character costs one set lookup instead of several
-    ``str.startswith`` calls.
+    Walking a source file character by character in Python costs a bytecode
+    dispatch per byte, and the overwhelming majority of bytes are ordinary code
+    that the walker only skips. This pattern lets the interpreter hand that skip
+    to the regex engine and resume at the next construct that actually matters.
+
+    Alternatives are ordered longest-first so that ``\"\"\"`` wins over ``\"`` and
+    ``//`` over ``/``.
     """
-    chars = set(syntax.quotes)
-    chars.update(t[0] for t in syntax.triples)
+    tokens: List[str] = [*syntax.triples]
     if syntax.block:
-        chars.add(syntax.block[0][0])
+        tokens.append(syntax.block[0])
     if syntax.line:
-        chars.add(syntax.line[0])
+        tokens.append(syntax.line)
+    tokens.extend(syntax.quotes)
     if syntax.regex_literals:
-        chars.add("/")
-    return frozenset(chars)
+        tokens.append("/")
+    tokens.sort(key=len, reverse=True)
+    return re.compile("|".join(re.escape(t) for t in tokens))
+
+
+# Trailing identifier of a code span, for the regex-literal heuristic.
+_TRAILING_WORD_RE = re.compile(r"[A-Za-z0-9_$]+$")
+
+
+@lru_cache(maxsize=None)
+def _string_scanner(delimiter: str) -> Pattern[str]:
+    """Regex matching whatever ends, escapes within, or wraps a string literal.
+
+    Same idea as :func:`_opener_scanner`: the body of a string is skipped, so let
+    the regex engine skip it. ``\\\\.`` is DOTALL so an escaped newline is one
+    match and still gets counted.
+    """
+    return re.compile(r"\\.|" + re.escape(delimiter) + r"|\n", re.DOTALL)
+
+
+def _skip_delimited(source: str, start: int, delimiter: str) -> int:
+    """Index just past the ``delimiter`` that closes the literal opened before
+    ``start``, or the end of the source if it is never closed.
+
+    Escapes are honoured, so ``"a \\" b"`` ends at the second unescaped quote.
+    """
+    scanner = _string_scanner(delimiter)
+    i = start
+    n = len(source)
+    while i < n:
+        match = scanner.search(source, i)
+        if match is None:
+            return n
+        token = match.group()
+        i = match.end()
+        if token == delimiter:
+            return i
+        # an escape pair or a bare newline: keep going
+    return n
 
 
 def _starts_line(source: str, index: int) -> bool:
@@ -260,14 +309,8 @@ def comment_text_by_line(source: str, syntax: LangSyntax) -> Dict[int, CommentLi
     line_no = 1
     i = 0
     n = len(source)
-    in_block = False
-    in_string: Optional[str] = None  # active single-line string delimiter
-    in_triple: Optional[str] = None  # active triple-quote delimiter
     prev_char = ""  # last significant *code* character seen
-    word_buf = ""  # word currently being accumulated
-    last_word = ""  # most recent code word
-    block_own_line = False  # did the open `/*` start its line?
-    block_first_piece = False  # the next block piece is on the opening line
+    last_word = ""  # identifier immediately before it, if any
     block_seq = 0  # identifies which block comment a body line came from
 
     def add(text: str, own_line: bool, block_id: int = 0) -> None:
@@ -275,121 +318,85 @@ def comment_text_by_line(source: str, syntax: LangSyntax) -> Dict[int, CommentLi
         starts_line.setdefault(line_no, own_line)
         block_ids.setdefault(line_no, block_id)
 
-    # Only these characters can open a string, a comment, or a regex literal.
-    # Every other code character is skipped after one set lookup.
-    openers = _openers(syntax)
+    scanner = _opener_scanner(syntax)
+    block_open = syntax.block[0] if syntax.block else None
+    block_close = syntax.block[1] if syntax.block else None
     # prev_char/last_word feed the regex heuristic and nothing else, so tracking
     # them is dead weight in languages without regex literals.
     track_tokens = syntax.regex_literals
 
     while i < n:
-        ch = source[i]
+        match = scanner.search(source, i)
+        if match is None:
+            break  # nothing but plain code remains
 
-        if ch == "\n":
-            line_no += 1
-            i += 1
-            # a line comment ends at newline; block/triple/string may continue
+        opener = match.start()
+        if opener > i:
+            # Everything skipped here is ordinary code. Only two things about it
+            # matter: how many lines it spanned, and its trailing token.
+            span = source[i:opener]
+            newlines = span.count("\n")
+            if newlines:
+                line_no += newlines
+            if track_tokens:
+                trailing = span.rstrip()
+                if trailing:
+                    prev_char = trailing[-1]
+                    word = _TRAILING_WORD_RE.search(trailing)
+                    last_word = word.group() if word else ""
+            i = opener
+
+        token = match.group()
+
+        if token in syntax.triples:
+            i = _skip_delimited(source, match.end(), token)
+            line_no += source.count("\n", match.end(), i)
+            prev_char, last_word = '"', ""
             continue
 
-        if in_block:
-            close = syntax.block[1]  # type: ignore[index]
-            found = source.find(close, i)
+        if token == block_open:
+            assert block_close is not None
+            own_line = _starts_line(source, i)
+            block_seq += 1
+            opened_on = line_no
+            body_start = match.end()
+            found = source.find(block_close, body_start)
             stop = n if found == -1 else found
-            for offset, piece in enumerate(source[i:stop].split("\n")):
+            for offset, piece in enumerate(source[body_start:stop].split("\n")):
                 if offset:
                     line_no += 1
                 if piece:
-                    add(piece, block_own_line if block_first_piece else True, block_seq)
-                    block_first_piece = False
-            if found == -1:
-                i = n
-            else:
-                in_block = False
-                i = found + len(close)
+                    add(piece, own_line if line_no == opened_on else True, block_seq)
+            i = n if found == -1 else found + len(block_close)
+            prev_char, last_word = "/", ""
             continue
 
-        if in_triple is not None:
-            if ch == "\\":
-                # an escaped newline still advances the line counter
-                if source.startswith("\n", i + 1):
-                    line_no += 1
-                i += 2
-                continue
-            if source.startswith(in_triple, i):
-                i += len(in_triple)
-                in_triple = None
-                prev_char, word_buf = '"', ""
-            else:
-                i += 1
+        if token == syntax.line:
+            own_line = _starts_line(source, i)
+            body_start = match.end()
+            found = source.find("\n", body_start)
+            stop = n if found == -1 else found
+            if stop > body_start:
+                add(source[body_start:stop], own_line)
+            i = stop
             continue
 
-        if in_string is not None:
-            if ch == "\\":
-                if source.startswith("\n", i + 1):
-                    line_no += 1
-                i += 2
-                continue
-            if ch == in_string:
-                in_string = None
-                prev_char, word_buf = ch, ""
-            i += 1
-            continue
-
-        # --- not currently inside string/comment ---
-        if ch in openers:
-            # triple-quoted strings (Python) take priority over single quotes
-            matched_triple = False
-            for t in syntax.triples:
-                if source.startswith(t, i):
-                    in_triple = t
-                    i += len(t)
-                    matched_triple = True
-                    break
-            if matched_triple:
-                continue
-
-            if syntax.block and source.startswith(syntax.block[0], i):
-                in_block = True
-                block_seq += 1
-                block_own_line = _starts_line(source, i)
-                block_first_piece = True
-                i += len(syntax.block[0])
-                continue
-
-            if syntax.line and source.startswith(syntax.line, i):
-                own_line = _starts_line(source, i)
-                i += len(syntax.line)
-                # rest of the physical line is a comment
-                found = source.find("\n", i)
-                stop = n if found == -1 else found
-                if stop > i:
-                    add(source[i:stop], own_line)
-                i = stop
-                continue
-
-            # A regex literal may contain `//` or `/*`; skip it before those can
-            # be mistaken for a comment opener.
-            if syntax.regex_literals and ch == "/" and starts_regex_literal(prev_char, last_word):
+        if token == "/":  # only reachable where regex literals exist
+            if starts_regex_literal(prev_char, last_word):
                 end = regex_literal_end(source, i)
                 if end is not None:
                     i = end
-                    prev_char, word_buf = "/", ""
+                    prev_char, last_word = "/", ""
                     continue
+            # division after all
+            i += 1
+            prev_char, last_word = "/", ""
+            continue
 
-            if ch in syntax.quotes:
-                in_string = ch
-                i += 1
-                continue
-
-        if track_tokens:
-            if _is_word_char(ch):
-                word_buf += ch
-                last_word = word_buf
-            else:
-                word_buf = ""
-            if not ch.isspace():
-                prev_char = ch
-        i += 1
+        # a single-delimiter string literal
+        i = _skip_delimited(source, match.end(), token)
+        line_no += source.count("\n", match.end(), i)
+        prev_char, last_word = token, ""
 
     return {ln: CommentLine("".join(frags), starts_line[ln], block_ids[ln]) for ln, frags in out.items()}
 

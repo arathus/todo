@@ -62,6 +62,14 @@ uv run ruff format --check . &&
 uv run mypy .
 """
 
+[tool.poe.tasks.perf]
+help = "Run the scan-throughput guard (needs no coverage instrumentation)"
+cmd = "uv run pytest tests/test_performance.py --no-cov -q"
+
+[tool.poe.tasks.bench]
+help = "Measure scan throughput over generated Python and JS corpora"
+cmd = "uv run python tools/benchmark.py"
+
 [tool.poe.tasks.sync-version]
 help = "Propagate todo_audit.__version__ to package.json and plugin.json"
 cmd = "uv run python tools/sync_version.py"

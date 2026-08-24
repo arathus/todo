@@ -47,6 +47,15 @@ def test_multiline_block_comment_marker() -> None:
     )
 
 
+def test_unterminated_string_ending_at_a_newline_is_tolerated() -> None:
+    # the string scan runs to the end of the source; a marker before it is still
+    # reported, and nothing after it is invented
+    source = "# TODO: before the broken string\nx = 'abc\n"
+    assert _hits(source, ".py") == [(TodoType.PLAIN, "before the broken string")], (
+        "an unterminated string literal must end the scan cleanly, not lose earlier markers"
+    )
+
+
 def test_unterminated_block_comment_still_yields_its_markers() -> None:
     source = "code();\n/*\n !TODO: never closed\n"
     assert _hits(source, ".js") == [(TodoType.URGENT, "never closed")], (

@@ -12,7 +12,14 @@ from __future__ import annotations
 import re
 from typing import List, NamedTuple, Optional, Tuple
 
-from .comments import LangSyntax, _openers, regex_literal_end, starts_regex_literal
+from .comments import (
+    _TRAILING_WORD_RE,
+    LangSyntax,
+    _opener_scanner,
+    _skip_delimited,
+    regex_literal_end,
+    starts_regex_literal,
+)
 from .models import Scope, ScopeInfo
 
 _CLASS_RE = re.compile(r"\bclass\b")
@@ -70,95 +77,94 @@ class _Frame(NamedTuple):
     symbol: Optional[str]  # dotted path built from the enclosing frames
 
 
+def _blank(text: str) -> str:
+    """``text`` with every character replaced by a space, newlines kept.
+
+    Preserving both length and line breaks is what lets the frame stack report
+    exact line numbers after a comment or string has been removed.
+    """
+    if "\n" not in text:
+        return " " * len(text)
+    return "\n".join(" " * len(piece) for piece in text.split("\n"))
+
+
 def _strip(source: str, syntax: LangSyntax) -> str:
     """Replace string, comment, and regex-literal characters with spaces.
 
     Newlines are preserved so line numbers stay exact; braces and semicolons in
     real code are preserved so the frame stack stays correct.
+
+    Plain code is copied a span at a time rather than a character at a time: the
+    regex engine finds the next construct in C, and everything before it is code
+    that passes through untouched.
     """
     out: List[str] = []
     i, n = 0, len(source)
-    in_block = False
-    in_string: Optional[str] = None
     prev_char = ""
-    word_buf = ""
     last_word = ""
-    # See comments._openers: one set lookup replaces several startswith calls.
-    openers = _openers(syntax)
+    scanner = _opener_scanner(syntax)
+    block_open = syntax.block[0] if syntax.block else None
+    block_close = syntax.block[1] if syntax.block else None
     track_tokens = syntax.regex_literals
 
     while i < n:
-        ch = source[i]
-        if ch == "\n":
-            out.append("\n")
-            i += 1
-            continue
-        if in_block:
-            close = syntax.block[1]  # type: ignore[index]
-            found = source.find(close, i)
-            stop = n if found == -1 else found
-            # blank the body line by line, preserving both length and newlines
-            for offset, piece in enumerate(source[i:stop].split("\n")):
-                if offset:
-                    out.append("\n")
-                out.append(" " * len(piece))
+        match = scanner.search(source, i)
+        if match is None:
+            out.append(source[i:])
+            break
+
+        opener = match.start()
+        if opener > i:
+            span = source[i:opener]
+            out.append(span)
+            if track_tokens:
+                trailing = span.rstrip()
+                if trailing:
+                    prev_char = trailing[-1]
+                    word = _TRAILING_WORD_RE.search(trailing)
+                    last_word = word.group() if word else ""
+            i = opener
+
+        token = match.group()
+
+        if token == block_open:
+            assert block_close is not None
+            found = source.find(block_close, match.end())
             if found == -1:
+                out.append(_blank(source[i:]))
                 i = n
             else:
-                in_block = False
-                out.append(" " * len(close))
-                i = found + len(close)
+                out.append(_blank(source[i : found + len(block_close)]))
+                i = found + len(block_close)
+            prev_char, last_word = "/", ""
             continue
-        if in_string is not None:
-            if ch == "\\":
-                # keep an escaped newline so the line count does not drift
-                nxt = source[i + 1] if i + 1 < n else ""
-                out.append(" ")
-                if nxt:
-                    out.append("\n" if nxt == "\n" else " ")
-                i += 2
-                continue
-            if ch == in_string:
-                in_string = None
-                prev_char, word_buf = ch, ""
-            out.append(" ")
-            i += 1
+
+        if token == syntax.line:
+            found = source.find("\n", match.end())
+            stop = n if found == -1 else found
+            out.append(_blank(source[i:stop]))
+            i = stop
             continue
-        if ch in openers:
-            if syntax.block and source.startswith(syntax.block[0], i):
-                in_block = True
-                out.append(" " * len(syntax.block[0]))
-                i += len(syntax.block[0])
-                continue
-            if syntax.line and source.startswith(syntax.line, i):
-                found = source.find("\n", i)
-                stop = n if found == -1 else found
-                out.append(" " * (stop - i))
-                i = stop
-                continue
-            # A regex literal may hold braces or comment openers; blank it out.
-            if syntax.regex_literals and ch == "/" and starts_regex_literal(prev_char, last_word):
+
+        if token == "/":  # only reachable where regex literals exist
+            if starts_regex_literal(prev_char, last_word):
                 end = regex_literal_end(source, i)
                 if end is not None:
-                    out.append(" " * (end - i))
+                    out.append(_blank(source[i:end]))
                     i = end
-                    prev_char, word_buf = "/", ""
+                    prev_char, last_word = "/", ""
                     continue
-            if ch in syntax.quotes:
-                in_string = ch
-                out.append(" ")
-                i += 1
-                continue
-        if track_tokens:
-            if ch.isalnum() or ch in "_$":
-                word_buf += ch
-                last_word = word_buf
-            else:
-                word_buf = ""
-            if not ch.isspace():
-                prev_char = ch
-        out.append(ch)
-        i += 1
+            out.append("/")  # division after all
+            i += 1
+            prev_char, last_word = "/", ""
+            continue
+
+        # a string literal: blank it, delimiters included
+        end = _skip_delimited(source, match.end(), token)
+        out.append(_blank(source[i:end]))
+        i = end
+        prev_char, last_word = token, ""
+
     return "".join(out)
 
 

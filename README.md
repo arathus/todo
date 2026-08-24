@@ -282,8 +282,31 @@ uv sync --extra dev --extra gitignore
 uv run poe lint          # ruff check --fix, ruff format, mypy
 uv run poe lint-check    # non-mutating variant (used in CI)
 uv run poe test          # pytest with branch coverage (fails under 85%)
+uv run poe perf          # scan-throughput guard (no coverage instrumentation)
+uv run poe bench         # measure throughput and print a report
 uv run poe sync-version  # propagate the version to the JSON manifests
 ```
+
+### Performance
+
+Throughput is a tested property, not a hope. `poe bench` reports MB of source
+scanned per second over generated corpora; on the development machine:
+
+| Corpus | Throughput |
+| ------ | ---------- |
+| Python | ~7.4 MB/s |
+| JavaScript | ~6.6 MB/s |
+
+`poe perf` guards it in CI. Because runners vary by several times, the guard is a
+*ratio*: the scan is measured against a fixed integer loop timed in the same
+process, which cancels out machine speed. It runs as its own task because
+coverage tracing costs far more per bytecode line than per loop iteration, and
+would make the measurement meaningless — under `poe test` it skips and says so.
+
+The guard catches a collapse, such as a per-character call slipping into the hot
+loop, rather than a few percent of drift; `poe bench` is the tool for that. Both
+walkers skip plain code a span at a time via a compiled alternation, so the
+common case never enters a Python-level loop at all.
 
 Quality bar: **ruff** (lint + format), **mypy `--strict`**, and **pytest** with
 branch coverage gated at 85%. The scanner itself carries **zero runtime
